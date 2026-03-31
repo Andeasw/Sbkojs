@@ -899,18 +899,6 @@ async function addVisitTask() {
 
 // Initialize Application
 async function startServer() {
-  try {
-    const ipReq = await axios.get('http://ipv4.ip.sb', { timeout: 3000 });
-    console.log(`\n[+] Server IP Address: ${ipReq.data.trim()}\n`);
-  } catch (err) {
-    try {
-      const fallbackIp = execSync('curl -sm 3 ipv4.ip.sb').toString().trim();
-      console.log(`\n[+] Server IP Address: ${fallbackIp}\n`);
-    } catch (e) {
-      console.log(`\n[-] Server IP Address: Unknown\n`);
-    }
-  }
-
   deleteNodes();
   cleanupOldFiles();
   argoType();
@@ -920,57 +908,19 @@ async function startServer() {
 }
 startServer();
 
-app.disable("x-powered-by");
-
 // Root Web Route
 app.get("/", async (req, res) => {
-  const indexPath = path.join(__dirname, "index.html");
-
-const fakeNginxPage = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Welcome to nginx!</title>
-    <style>
-      body {
-        width: 35em;
-        margin: 0 auto;
-        font-family: Tahoma, Verdana, Arial, sans-serif;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Welcome to nginx!</h1>
-    <p>If you see this page, the nginx web server is successfully installed and
-working. Further configuration is required.</p>
-
-    <p>For online documentation and support please refer to
-      <a href="http://nginx.org/" target="_blank">nginx.org</a>.<br/>
-      Commercial support is available at
-      <a href="http://nginx.com/" target="_blank">nginx.com</a>.
-    </p>
-
-    <p><em>Thank you for using nginx.</em></p>
-  </body>
-</html>
-`;
-
-  // Root Web Route
   try {
+    const indexPath = path.join(__dirname, 'index.html');
     if (fs.existsSync(indexPath)) {
-      const data = await fs.promises.readFile(indexPath, "utf8");
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(data);
+      const data = await fs.promises.readFile(indexPath, 'utf8');
+      res.send(data);
     } else {
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(fakeNginxPage);
+      res.send(`Hello world!<br><br>You can access /${SUB_PATH} (Default: /sub) to get your nodes!`);
     }
   } catch (err) {
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    return res.send(fakeNginxPage);
+    res.send(`Hello world!<br><br>You can access /${SUB_PATH} (Default: /sub) to get your nodes!`);
   }
 });
 
-app.listen(PORT, () =>
-  console.log(`Server is running on port: ${PORT}`)
-);
+app.listen(PORT, () => console.log(`Server is running on port: ${PORT}!\nInitialization complete!`));
