@@ -23,44 +23,45 @@ function parseBool(val, defaultVal) {
   return defaultVal;
 }
 
+const UPLOAD_URL = process.env.UPLOAD_URL || '';
+const PROJECT_URL = process.env.PROJECT_URL || '';
 const AUTO_ACCESS = parseBool(process.env.AUTO_ACCESS, false);
 const YT_WARPOUT = parseBool(process.env.YT_WARPOUT, false);
 const FILE_PATH = process.env.FILE_PATH || '.cache';
 const SUB_PATH = process.env.SUB_PATH || 'subb';
-
-const UUID = process.env.UUID || '26fbd6ba-3660-4058-a3c2-310bef5419fd';
-const KOMARI_SERVER = process.env.KOMARI_SERVER || ''; // e.g. https://km.example.com
-const KOMARI_KEY = process.env.KOMARI_KEY || '';
 const NEZHA_SERVER = process.env.NEZHA_SERVER || '';
 const NEZHA_PORT = process.env.NEZHA_PORT || '';
 const NEZHA_KEY = process.env.NEZHA_KEY || '';
+
+const UUID = process.env.UUID || 'bab21ffc-703c-4213-958d-ed355ba6b30c';
+const KOMARI_SERVER = process.env.KOMARI_SERVER || ''; // e.g. https://km.example.com
+const KOMARI_KEY = process.env.KOMARI_KEY || '';
 
 const ARGO_DOMAIN = process.env.ARGO_DOMAIN || '';
 const ARGO_AUTH = process.env.ARGO_AUTH || '';
 const ARGO_PORT = process.env.ARGO_PORT || 8001;
 const ARGO_VMESS_PORT = parseInt(ARGO_PORT, 10) + 1;
-const CFIP = process.env.CFIP || 'sub.danfeng.eu.org';
-const CFPORT = process.env.CFPORT || 443;
 const DISABLE_ARGO = parseBool(process.env.DISABLE_ARGO, true); // false/true
 
+const S5_PORT = process.env.S5_PORT || '';
 const TUIC_PORT = process.env.TUIC_PORT || '';
 const HY2_PORT = process.env.HY2_PORT || '';
 const HY2_OBFS = parseBool(process.env.HY2_OBFS, false); // ture/false
 const ANYTLS_PORT = process.env.ANYTLS_PORT || '';
-const S5_PORT = process.env.S5_PORT || '';
 const REALITY_PORT = process.env.REALITY_PORT || '';
 const ANYREALITY_PORT = process.env.ANYREALITY_PORT || '';
 const REALITY_DOMAIN = process.env.REALITY_DOMAIN || 'www.iij.ad.jp';
+const CFIP = process.env.CFIP || 'sub.danfeng.eu.org';
+const CFPORT = process.env.CFPORT || 443;
+const PORT = process.env.PORT || 3000;
+
 const NAME = process.env.NAME || '';
 const DOMAIN_NAME = process.env.DOMAIN_NAME || '';
 const DOMAIN_CERT = process.env.DOMAIN_CERT || '';
 const DOMAIN_KEY = process.env.DOMAIN_KEY || '';
 
-const PORT = process.env.PORT || 3000;
 const CHAT_ID = process.env.CHAT_ID || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const UPLOAD_URL = process.env.UPLOAD_URL || '';
-const PROJECT_URL = process.env.PROJECT_URL || '';
 
 // Create working directory
 if (!fs.existsSync(FILE_PATH)) {
@@ -649,7 +650,7 @@ uuid: ${UUID}`;
     console.log('Nezha Agent is running');
   }
 
-  // Run Komari Probe (Spawn and Auto-Restart Guarded)
+  // Run Komari Probe 
   if (KOMARI_SERVER && KOMARI_KEY) {
     const kServer = KOMARI_SERVER.startsWith('http') ? KOMARI_SERVER : `https://${KOMARI_SERVER}`;
     startKomari(kmPath, kServer, KOMARI_KEY);
@@ -660,7 +661,7 @@ uuid: ${UUID}`;
   exec(`nohup ${webPath} run -c ${configPath} >/dev/null 2>&1 &`, () => {});
   console.log('Web service is running');
 
-  // Run Cloudflared Bot
+  // Run CF Bot
   if (!DISABLE_ARGO && fs.existsSync(botPath)) {
     let args;
     if (ARGO_AUTH.match(/^[A-Z0-9a-z=]{120,250}$/)) {
@@ -827,30 +828,18 @@ async function generateLinks(argoDomain) {
   }, 2000);
 }
 
-// Scheduled Cleanup 
-function cleanFiles() { 
-  setTimeout(() => { 
-
-    const filesToDelete = [
-      bootLogPath,
-      configPath,
-      listPath,
-      webPath,
-      botPath,
-      phpPath,
-      npmPath,
-      kmPath
-    ]; 
-
+// Scheduled Cleanup
+function cleanFiles() {
+  setTimeout(() => {
+    const filesToDelete = [bootLogPath, configPath, listPath, webPath, botPath, phpPath, npmPath, kmPath]; 
     filesToDelete.forEach(file => { 
       try { 
         if (fs.existsSync(file)) fs.unlinkSync(file); 
       } catch (e) {} 
-    }); 
- 
-    console.clear(); 
-    console.log('App is successfully running.\nThank you for using this script, enjoy!'); 
+    });
 
+    console.clear(); 
+    console.log('End');
   }, 90000); 
 }
 
@@ -907,8 +896,6 @@ async function startServer() {
   cleanFiles();
 }
 startServer();
-
-app.disable("x-powered-by");
 
 // Root Web Route
 app.get("/", async (req, res) => {
