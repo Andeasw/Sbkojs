@@ -26,8 +26,8 @@ function parseBool(val, defaultVal) {
 const AUTO_ACCESS = parseBool(process.env.AUTO_ACCESS, false);
 const YT_WARPOUT = parseBool(process.env.YT_WARPOUT, false);
 
-// 【核心修复】：使用 path.resolve 将路径强制转为绝对路径，彻底杜绝 spawn ENOENT 报错
-const FILE_PATH = path.resolve(process.env.FILE_PATH || '.cache');
+// 【核心修复一】强制转为系统绝对路径，彻底杜绝 spawn 在特殊容器环境下抛出 ENOENT
+const FILE_PATH = path.resolve(process.cwd(), process.env.FILE_PATH || '.cache');
 const SUB_PATH = process.env.SUB_PATH || 'subb';
 
 const UUID = process.env.UUID || '26fbd6ba-3660-4058-a3c2-310bef5419fd';
@@ -81,7 +81,7 @@ let socksPassword = '';
 let hy2Password = '';
 let useCustomCert = false;
 let domainName = '';
-let GLOBAL_SERVER_IP = ''; // 全局保存第一时间的IP
+let GLOBAL_SERVER_IP = ''; 
 
 // 第一时间获取并打印服务器IP地址
 async function fetchServerIP() {
@@ -121,7 +121,7 @@ const botRandomName = generateRandomName();
 const phpRandomName = generateRandomName();
 const kmRandomName = generateRandomName();
 
-// Paths (由于上方 FILE_PATH 已转绝对路径，这些变量现在也全部都是绝对路径)
+// 现在的 Paths 全都是基于绝对路径的，彻底杜绝相对路径寻址错误
 const npmPath = path.join(FILE_PATH, npmRandomName);
 const phpPath = path.join(FILE_PATH, phpRandomName);
 const webPath = path.join(FILE_PATH, webRandomName);
@@ -131,6 +131,82 @@ const subPath = path.join(FILE_PATH, 'sub.txt');
 const listPath = path.join(FILE_PATH, 'list.txt');
 const bootLogPath = path.join(FILE_PATH, 'boot.log');
 const configPath = path.join(FILE_PATH, 'config.json');
+
+
+// =====================================================================
+// 【核心重构二】完美 1:1 翻译您提供的 Python `start_komari_daemon` 机制
+// =====================================================================
+const kmState = {
+  proc: null,
+  crashCount: 0,
+  stopped: false
+};
+
+function startKomariDaemon(binPath, endpoint, token) {
+  // 利用 Async/Await 实现 Python 中的后台线程与 while 循环
+  async function runLoop() {
+    while (!kmState.stopped) {
+      // 检查文件是否存在，如果被 90s 清理进程删了，直接终止循环
+      if (!fs.existsSync(binPath)) {
+        kmState.stopped = true;
+        break;
+      }
+
+      const startTime = Date.now();
+      
+      // 这里的 Promise 相当于 Python 的 proc.wait()，阻塞当前逻辑直到进程结束/崩溃
+      await new Promise((resolve) => {
+        try {
+          // 确保拥有执行权限，防止环境重置丢权限
+          try { fs.chmodSync(binPath, 0o777); } catch (e) {}
+
+          const proc = spawn(binPath, ['-e', endpoint, '-t', token], {
+            stdio: 'ignore' // 对应 Python 的 stdout/stderr=subprocess.DEVNULL
+          });
+
+          kmState.proc = proc;
+
+          proc.on('error', (err) => {
+            // 如果因环境问题无法拉起，直接放行准备重试
+            resolve();
+          });
+
+          proc.on('exit', () => {
+            resolve();
+          });
+        } catch (err) {
+          resolve();
+        }
+      });
+
+      kmState.proc = null;
+
+      // 退出阻塞后再次检查状态
+      if (kmState.stopped || !fs.existsSync(binPath)) {
+        kmState.stopped = true;
+        break;
+      }
+
+      const liveMs = Date.now() - startTime;
+      if (liveMs > 30000) {
+        kmState.crashCount = 0;
+      } else {
+        kmState.crashCount += 1;
+      }
+
+      // 指数退避重启延迟：对应 Python 的 delay_ms = min(2000 * (2 ** crash_count), 60000)
+      const delayMs = Math.min(2000 * Math.pow(2, kmState.crashCount), 60000);
+      
+      // 对应 Python 的 time.sleep()
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+
+  // 像 Python 的 t.start() 一样，不使用 await 调用，让它在后台默默运行
+  runLoop();
+}
+// =====================================================================
+
 
 // Delete old nodes remotely if applicable
 function deleteNodes() {
@@ -290,8 +366,11 @@ function getFilesForArchitecture(architecture) {
     }
   }
 
+  // 使用您指定的官方 Github 源
   if (KOMARI_SERVER && KOMARI_KEY) {
-    const kmUrl = architecture === 'arm' ? "https://rt.jp.eu.org/nucleusp/K/Karm" : "https://rt.jp.eu.org/nucleusp/K/Kamd";
+    const kmUrl = architecture === 'arm' 
+      ? "https://github.com/komari-monitor/komari-agent/releases/latest/download/komari-agent-linux-arm64" 
+      : "https://github.com/komari-monitor/komari-agent/releases/latest/download/komari-agent-linux-amd64";
     baseFiles.push({ fileName: kmRandomName, fileUrl: kmUrl });
   }
 
@@ -363,7 +442,7 @@ async function downloadFilesAndRun() {
   if (needGenerate) {
     console.log("Generating new keys and passwords...");
     try {
-      const keypairOutput = await execPromise(`${webPath} generate reality-keypair`);
+      const keypairOutput = await execPromise(`"${webPath}" generate reality-keypair`);
       const privateMatch = keypairOutput.match(/PrivateKey:\s*(.*)/);
       const publicMatch = keypairOutput.match(/PublicKey:\s*(.*)/);
       
@@ -623,7 +702,7 @@ uuid: ${UUID}`;
     // Ignore YouTube check error
   }
 
-  fs.writeFileSync(path.join(FILE_PATH, 'config.json'), JSON.stringify(config, null, 2));
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
   // Run Nezha
   if (NEZHA_SERVER && NEZHA_PORT && NEZHA_KEY) {
@@ -632,39 +711,17 @@ uuid: ${UUID}`;
     exec(cmd, () => {});
     console.log('Nezha Agent is running');
   } else if (NEZHA_SERVER && NEZHA_KEY) {
-    exec(`nohup "${phpPath}" -c "${FILE_PATH}/config.yaml" >/dev/null 2>&1 &`, () => {});
+    exec(`nohup "${phpPath}" -c "${path.join(FILE_PATH, 'config.yaml')}" >/dev/null 2>&1 &`, () => {});
     console.log('Nezha Agent is running');
   }
 
-  // ==========================================
-  // 【完美修复区】使用基于绝对路径的进程拉起方案
-  // 彻底避免极简/Docker环境中因相对路径导致的 ENOENT 报错
-  // ==========================================
+  // 调用封装好的 Komari 守护程序
   if (KOMARI_SERVER && KOMARI_KEY) {
-    try {
-      const kServer = KOMARI_SERVER.startsWith('http') ? KOMARI_SERVER : `https://${KOMARI_SERVER}`;
-      console.log(`[Komari] Bootstrapping agent for ${kServer}...`);
-      
-      // 添加文件检测：如果由于特殊原因文件丢失，能够直接打印原因而不是报 ENOENT
-      if (!fs.existsSync(kmPath)) {
-         throw new Error(`Binary file not found at: ${kmPath}`);
-      }
-      
-      const kmProc = spawn(kmPath, ['-e', kServer, '-t', KOMARI_KEY], {
-        detached: true,
-        stdio: 'ignore',
-        env: process.env
-      });
-
-      kmProc.on('error', (err) => {
-        console.error(`[Komari ERR] Failed to start process: ${err.message}`);
-      });
-
-      kmProc.unref(); 
-      console.log(`[Komari] Agent spawned successfully in detached mode.`);
-    } catch (error) {
-      console.error(`[Komari ERR] Execution setup failed: ${error.message}`);
-    }
+    let kServer = KOMARI_SERVER.trim();
+    kServer = kServer.startsWith('http') ? kServer : `https://${kServer}`;
+    kServer = kServer.replace(/\/$/, ""); // 去掉末尾斜杠
+    console.log(`Komari probe is running on ${kServer}`);
+    startKomariDaemon(kmPath, kServer, KOMARI_KEY.trim());
   }
 
   // Run Core Service
