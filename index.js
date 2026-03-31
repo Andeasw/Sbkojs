@@ -12,41 +12,55 @@ const { promisify } = require('util');
 const exec = promisify(require('child_process').exec);
 const { execSync, spawn } = require('child_process');
 
-// Environment Variables
-const UPLOAD_URL = process.env.UPLOAD_URL || '';
-const PROJECT_URL = process.env.PROJECT_URL || '';
-const AUTO_ACCESS = process.env.AUTO_ACCESS === 'true';
-const YT_WARPOUT = process.env.YT_WARPOUT === 'true';
+function parseBool(val, defaultVal) {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') {
+    const lower = val.toLowerCase().trim();
+    if (lower === 'true' || lower === '1' || lower === 'yes') return true;
+    if (lower === 'false' || lower === '0' || lower === 'no') return false;
+  }
+  return defaultVal;
+}
+
+const AUTO_ACCESS = parseBool(process.env.AUTO_ACCESS, false);
+const YT_WARPOUT = parseBool(process.env.YT_WARPOUT, false);
 const FILE_PATH = process.env.FILE_PATH || '.cache';
 const SUB_PATH = process.env.SUB_PATH || 'subb';
-const UUID = process.env.UUID || '0a6568ff-ea3c-4271-9020-450560e10d63';
+
+const UUID = process.env.UUID || '26fbd6ba-3660-4058-a3c2-310bef5419fd';
+const KOMARI_SERVER = process.env.KOMARI_SERVER || ''; // e.g. https://km.example.com
+const KOMARI_KEY = process.env.KOMARI_KEY || '';
 const NEZHA_SERVER = process.env.NEZHA_SERVER || '';
 const NEZHA_PORT = process.env.NEZHA_PORT || '';
 const NEZHA_KEY = process.env.NEZHA_KEY || '';
-const KOMARI_SERVER = process.env.KOMARI_SERVER || '';
-const KOMARI_KEY = process.env.KOMARI_KEY || '';
+
 const ARGO_DOMAIN = process.env.ARGO_DOMAIN || '';
 const ARGO_AUTH = process.env.ARGO_AUTH || '';
 const ARGO_PORT = process.env.ARGO_PORT || 8001;
 const ARGO_VMESS_PORT = parseInt(ARGO_PORT, 10) + 1;
-const S5_PORT = process.env.S5_PORT || '';
+const CFIP = process.env.CFIP || 'sub.danfeng.eu.org';
+const CFPORT = process.env.CFPORT || 443;
+const DISABLE_ARGO = parseBool(process.env.DISABLE_ARGO, true); // false/true
+
 const TUIC_PORT = process.env.TUIC_PORT || '';
 const HY2_PORT = process.env.HY2_PORT || '';
 const HY2_OBFS = parseBool(process.env.HY2_OBFS, false); // ture/false
 const ANYTLS_PORT = process.env.ANYTLS_PORT || '';
+const S5_PORT = process.env.S5_PORT || '';
 const REALITY_PORT = process.env.REALITY_PORT || '';
 const ANYREALITY_PORT = process.env.ANYREALITY_PORT || '';
-const CFIP = process.env.CFIP || 'sub.danfeng.eu.org';
-const CFPORT = process.env.CFPORT || 443;
-const PORT = process.env.PORT || 3000;
-const NAME = process.env.NAME || '';
-const CHAT_ID = process.env.CHAT_ID || '';
-const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const DISABLE_ARGO = parseBool(process.env.DISABLE_ARGO, true); // false/true
 const REALITY_DOMAIN = process.env.REALITY_DOMAIN || 'www.iij.ad.jp';
+const NAME = process.env.NAME || '';
 const DOMAIN_NAME = process.env.DOMAIN_NAME || '';
 const DOMAIN_CERT = process.env.DOMAIN_CERT || '';
 const DOMAIN_KEY = process.env.DOMAIN_KEY || '';
+
+const PORT = process.env.PORT || 3000;
+const CHAT_ID = process.env.CHAT_ID || '';
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const UPLOAD_URL = process.env.UPLOAD_URL || '';
+const PROJECT_URL = process.env.PROJECT_URL || '';
 
 // Create working directory
 if (!fs.existsSync(FILE_PATH)) {
@@ -94,14 +108,12 @@ const listPath = path.join(FILE_PATH, 'list.txt');
 const bootLogPath = path.join(FILE_PATH, 'boot.log');
 const configPath = path.join(FILE_PATH, 'config.json');
 
-// ── Komari 守护状态 (Daemon Logic) ───────────────────────────
 const kmState = {
-  proc: null,       // 当前进程句柄
-  crashCount: 0,    // 连续崩溃次数
-  stopped: false,   // 外部停止标志
+  proc: null,
+  crashCount: 0,
+  stopped: false,
 };
 
-// 启动 komari-agent，崩溃后自动按指数回退重启
 function startKomari(binPath, endpoint, token) {
   if (kmState.stopped) return;
 
@@ -132,7 +144,6 @@ function startKomari(binPath, endpoint, token) {
     setTimeout(() => startKomari(binPath, endpoint, token), delayMs);
   });
 }
-// ────────────────────────────────────────────────────────────
 
 // Delete old nodes remotely if applicable
 function deleteNodes() {
@@ -171,24 +182,15 @@ function isValidPort(port) {
   }
 }
 
-// Cleanup initialization files (已修复：彻底清理旧版的随机内核，保留持久化配置)
+// Cleanup initialization files
 function cleanupOldFiles() {
-  try {
-    if (fs.existsSync(FILE_PATH)) {
-      const files = fs.readdirSync(FILE_PATH);
-      // 保留必要的持久化和证书文件
-      const keepFiles = ['persist.json', 'tls_cert.pem', 'tls_private.key', 'custom_cert.pem', 'custom_private.key', 'tunnel.yml', 'tunnel.json', 'config.yaml'];
-      files.forEach(file => {
-        if (!keepFiles.includes(file)) {
-          const filePath = path.join(FILE_PATH, file);
-          try {
-            const stat = fs.statSync(filePath);
-            if (stat.isFile()) fs.unlinkSync(filePath);
-          } catch (err) {}
-        }
-      });
+  const pathsToDelete =[webRandomName, botRandomName, npmRandomName, kmRandomName, 'boot.log', 'list.txt'];
+  pathsToDelete.forEach(file => {
+    const fPath = path.join(FILE_PATH, file);
+    if (fs.existsSync(fPath)) {
+      fs.unlink(fPath, () => {});
     }
-  } catch (err) {}
+  });
 }
 
 // Setup Argo configuration
@@ -473,7 +475,7 @@ uuid: ${UUID}`;
         tag: "vless-ws-in",
         type: "vless",
         listen: "::",
-        listen_port: ARGO_PORT,
+        listen_port: parseInt(ARGO_PORT, 10),
         users:[{ uuid: UUID, flow: "" }],
         transport: {
           type: "ws",
@@ -647,11 +649,11 @@ uuid: ${UUID}`;
     console.log('Nezha Agent is running');
   }
 
-  // Run Komari Probe (使用守护进程模式)
+  // Run Komari Probe (Spawn and Auto-Restart Guarded)
   if (KOMARI_SERVER && KOMARI_KEY) {
     const kServer = KOMARI_SERVER.startsWith('http') ? KOMARI_SERVER : `https://${KOMARI_SERVER}`;
     startKomari(kmPath, kServer, KOMARI_KEY);
-    console.log('Komari probe is running (Daemonized)');
+    console.log('Komari probe is running on', kServer);
   }
 
   // Run Core Service
@@ -706,7 +708,7 @@ async function extractDomains() {
           fs.unlinkSync(bootLogPath);
           try { await execPromise(`pkill -f "${botRandomName}" > /dev/null 2>&1`); } catch (err) {}
           await new Promise(r => setTimeout(r, 1000));
-          const args = `tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile ${bootLogPath} --loglevel info --url http://localhost:${ARGO_VMESS_PORT}`;
+          const args = `tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile ${bootLogPath} --loglevel info --url http://localhost:${ARGO_PORT}`;
           exec(`nohup ${botPath} ${args} >/dev/null 2>&1 &`);
           setTimeout(() => extractDomains(), 6000);
         }
@@ -766,12 +768,14 @@ async function generateLinks(argoDomain) {
       const vlessLink = `vless://${UUID}@${CFIP}:${CFPORT}?encryption=none&security=tls&sni=${argoDomain}&type=ws&host=${argoDomain}&path=${vlessPath}&fp=firefox#${nodeName}-VLESS`;
       subTxt = `${vlessLink}`;
 
-      const vmessConfig = {
-        v: '2', ps: `${nodeName}-VMess`, add: CFIP, port: CFPORT, id: UUID, aid: '0',
-        scy: 'auto', net: 'ws', type: 'none', host: argoDomain, path: '/vmess-argo?ed=2560',
-        tls: 'tls', sni: argoDomain, alpn: '', fp: 'firefox'
-      };
-      subTxt += `\nvmess://${Buffer.from(JSON.stringify(vmessConfig)).toString('base64')}`;
+      if (ARGO_AUTH) {
+        const vmessConfig = {
+          v: '2', ps: `${nodeName}-VMess`, add: CFIP, port: CFPORT, id: UUID, aid: '0',
+          scy: 'auto', net: 'ws', type: 'none', host: argoDomain, path: '/vmess-argo?ed=2560',
+          tls: 'tls', sni: argoDomain, alpn: '', fp: 'firefox'
+        };
+        subTxt += `\nvmess://${Buffer.from(JSON.stringify(vmessConfig)).toString('base64')}`;
+      }
     }
 
     if (isValidPort(TUIC_PORT)) {
@@ -824,25 +828,30 @@ async function generateLinks(argoDomain) {
 }
 
 // Scheduled Cleanup 
-function cleanFiles() {
-  setTimeout(() => {
-    // 移除了 kmPath，因为 Komari Daemon 崩溃时需要通过该文件重新拉起进程
-    const filesToDelete =[bootLogPath, configPath, listPath, webPath, botPath, phpPath, npmPath];
-    filesToDelete.forEach(file => {
-      try {
-        if (fs.existsSync(file)) fs.unlinkSync(file);
-      } catch (e) {}
-    });
+function cleanFiles() { 
+  setTimeout(() => { 
 
-    // 守护监控：若 kmPath 文件被外部手段清除，则停止该守护尝试
-    if (KOMARI_SERVER && KOMARI_KEY && !fs.existsSync(kmPath)) {
-      kmState.stopped = true;
-      if (kmState.proc) { try { kmState.proc.kill(); } catch(e){} }
-    }
+    const filesToDelete = [
+      bootLogPath,
+      configPath,
+      listPath,
+      webPath,
+      botPath,
+      phpPath,
+      npmPath,
+      kmPath
+    ]; 
 
-    console.clear();
-    console.log('App is successfully running.\nThank you for using this script, enjoy!');
-  }, 90000);
+    filesToDelete.forEach(file => { 
+      try { 
+        if (fs.existsSync(file)) fs.unlinkSync(file); 
+      } catch (e) {} 
+    }); 
+ 
+    console.clear(); 
+    console.log('App is successfully running.\nThank you for using this script, enjoy!'); 
+
+  }, 90000); 
 }
 
 // Telegram Push
