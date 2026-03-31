@@ -23,45 +23,44 @@ function parseBool(val, defaultVal) {
   return defaultVal;
 }
 
-const UPLOAD_URL = process.env.UPLOAD_URL || '';
-const PROJECT_URL = process.env.PROJECT_URL || '';
 const AUTO_ACCESS = parseBool(process.env.AUTO_ACCESS, false);
 const YT_WARPOUT = parseBool(process.env.YT_WARPOUT, false);
 const FILE_PATH = process.env.FILE_PATH || '.cache';
 const SUB_PATH = process.env.SUB_PATH || 'subb';
+
+const UUID = process.env.UUID || '26fbd6ba-3660-4058-a3c2-310bef5419fd';
+const KOMARI_SERVER = process.env.KOMARI_SERVER || ''; // e.g. https://km.example.com
+const KOMARI_KEY = process.env.KOMARI_KEY || '';
 const NEZHA_SERVER = process.env.NEZHA_SERVER || '';
 const NEZHA_PORT = process.env.NEZHA_PORT || '';
 const NEZHA_KEY = process.env.NEZHA_KEY || '';
-
-const UUID = process.env.UUID || 'bab21ffc-703c-4213-958d-ed355ba6b30c';
-const KOMARI_SERVER = process.env.KOMARI_SERVER || '';
-const KOMARI_KEY = process.env.KOMARI_KEY || '';
 
 const ARGO_DOMAIN = process.env.ARGO_DOMAIN || '';
 const ARGO_AUTH = process.env.ARGO_AUTH || '';
 const ARGO_PORT = process.env.ARGO_PORT || 8001;
 const ARGO_VMESS_PORT = parseInt(ARGO_PORT, 10) + 1;
-const DISABLE_ARGO = parseBool(process.env.DISABLE_ARGO, true);
+const CFIP = process.env.CFIP || 'sub.danfeng.eu.org';
+const CFPORT = process.env.CFPORT || 443;
+const DISABLE_ARGO = parseBool(process.env.DISABLE_ARGO, true); // false/true
 
-const S5_PORT = process.env.S5_PORT || '';
 const TUIC_PORT = process.env.TUIC_PORT || '';
 const HY2_PORT = process.env.HY2_PORT || '';
-const HY2_OBFS = parseBool(process.env.HY2_OBFS, false);
+const HY2_OBFS = parseBool(process.env.HY2_OBFS, false); // ture/false
 const ANYTLS_PORT = process.env.ANYTLS_PORT || '';
+const S5_PORT = process.env.S5_PORT || '';
 const REALITY_PORT = process.env.REALITY_PORT || '';
 const ANYREALITY_PORT = process.env.ANYREALITY_PORT || '';
 const REALITY_DOMAIN = process.env.REALITY_DOMAIN || 'www.iij.ad.jp';
-const CFIP = process.env.CFIP || 'sub.danfeng.eu.org';
-const CFPORT = process.env.CFPORT || 443;
-const PORT = process.env.PORT || 3000;
-
 const NAME = process.env.NAME || '';
 const DOMAIN_NAME = process.env.DOMAIN_NAME || '';
 const DOMAIN_CERT = process.env.DOMAIN_CERT || '';
 const DOMAIN_KEY = process.env.DOMAIN_KEY || '';
 
+const PORT = process.env.PORT || 3000;
 const CHAT_ID = process.env.CHAT_ID || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const UPLOAD_URL = process.env.UPLOAD_URL || '';
+const PROJECT_URL = process.env.PROJECT_URL || '';
 
 // Create working directory
 if (!fs.existsSync(FILE_PATH)) {
@@ -109,112 +108,41 @@ const listPath = path.join(FILE_PATH, 'list.txt');
 const bootLogPath = path.join(FILE_PATH, 'boot.log');
 const configPath = path.join(FILE_PATH, 'config.json');
 
-async function fetchAndLogIP() {
-  let ip = '';
-  try {
-    const res = await axios.get('http://ipv4.ip.sb', { timeout: 4000 });
-    ip = res.data.trim();
-  } catch (_) {
-    try {
-      ip = execSync('curl -sm 4 ipv4.ip.sb').toString().trim();
-    } catch (_) {
-      try {
-        const res6 = await axios.get('http://ipv6.ip.sb', { timeout: 4000 });
-        ip = `[${res6.data.trim()}]`;
-      } catch (_) {
-        try {
-          ip = `[${execSync('curl -sm 4 ipv6.ip.sb').toString().trim()}]`;
-        } catch (_) {
-          ip = 'Unknown';
-        }
-      }
-    }
-  }
-  console.log(`\x1b[36m[Server IP] ${ip}\x1b[0m`);
-  return ip;
-}
-
 const kmState = {
   proc: null,
   crashCount: 0,
   stopped: false,
-  cleanupTimer: null,
 };
 
 function startKomari(binPath, endpoint, token) {
   if (kmState.stopped) return;
 
-  if (!fs.existsSync(binPath)) {
-    console.warn(`[Komari] Binary not found at ${binPath}, retrying in 3s...`);
-    setTimeout(() => startKomari(binPath, endpoint, token), 3000);
-    return;
-  }
-
-  try {
-    fs.chmodSync(binPath, 0o775);
-  } catch (e) {
-    console.warn(`[Komari] chmod failed: ${e.message}`);
-  }
-
-  console.log(`[Komari] Starting (crash_count=${kmState.crashCount}) -> ${endpoint}`);
-
   const startTime = Date.now();
-
   const proc = spawn(binPath, ['-e', endpoint, '-t', token], {
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'ignore', 'ignore'],
     detached: false,
   });
 
   kmState.proc = proc;
 
-  proc.stdout.on('data', (data) => {
-    const msg = data.toString().trim();
-    if (msg) console.log(`[Komari] ${msg}`);
-  });
-
-  proc.stderr.on('data', (data) => {
-    const msg = data.toString().trim();
-    if (msg) console.warn(`[Komari][stderr] ${msg}`);
-  });
-
-  proc.on('error', (err) => {
-    console.error(`[Komari] Spawn error: ${err.message}`);
-    kmState.proc = null;
+  proc.on('error', () => {
     kmState.stopped = true;
   });
 
-  proc.on('close', (code, signal) => {
+  proc.on('close', () => {
     kmState.proc = null;
-    if (kmState.stopped) {
-      console.log('[Komari] Stopped gracefully.');
-      return;
-    }
+    if (kmState.stopped) return;
 
     const liveMs = Date.now() - startTime;
-    console.warn(`[Komari] Exited (code=${code}, signal=${signal}, lived=${liveMs}ms)`);
-
-    // 存活超过 30s 视为正常运行后崩溃，重置计数
     if (liveMs > 30000) {
       kmState.crashCount = 0;
     } else {
       kmState.crashCount++;
     }
 
-    const delayMs = Math.min(2000 * Math.pow(2, kmState.crashCount - 1), 60000);
-    console.log(`[Komari] Restarting in ${delayMs}ms (attempt #${kmState.crashCount})...`);
+    const delayMs = Math.min(2000 * Math.pow(2, kmState.crashCount), 60000);
     setTimeout(() => startKomari(binPath, endpoint, token), delayMs);
   });
-}
-
-function stopKomari() {
-  kmState.stopped = true;
-  if (kmState.proc) {
-    try {
-      kmState.proc.kill('SIGTERM');
-    } catch (e) {}
-    kmState.proc = null;
-  }
-  console.log('[Komari] Watchdog stopped.');
 }
 
 // Delete old nodes remotely if applicable
@@ -225,13 +153,13 @@ function deleteNodes() {
   try {
     const fileContent = fs.readFileSync(subPath, 'utf-8');
     const decoded = Buffer.from(fileContent, 'base64').toString('utf-8');
-    const nodes = decoded.split('\n').filter(line =>
+    const nodes = decoded.split('\n').filter(line => 
       /(vless|vmess|trojan|hysteria2|tuic|anytls|socks):\/\//.test(line)
     );
 
     if (nodes.length === 0) return;
 
-    axios.post(`${UPLOAD_URL}/api/delete-nodes`,
+    axios.post(`${UPLOAD_URL}/api/delete-nodes`, 
       JSON.stringify({ nodes }),
       { headers: { 'Content-Type': 'application/json' } }
     ).catch(() => { });
@@ -256,7 +184,7 @@ function isValidPort(port) {
 
 // Cleanup initialization files
 function cleanupOldFiles() {
-  const pathsToDelete = [webRandomName, botRandomName, npmRandomName, kmRandomName, 'boot.log', 'list.txt'];
+  const pathsToDelete =[webRandomName, botRandomName, npmRandomName, kmRandomName, 'boot.log', 'list.txt'];
   pathsToDelete.forEach(file => {
     const fPath = path.join(FILE_PATH, file);
     if (fs.existsSync(fPath)) {
@@ -356,7 +284,7 @@ function downloadFile(fileName, fileUrl) {
 
 // Map files for Architecture
 function getFilesForArchitecture(architecture) {
-  let baseFiles = [];
+  let baseFiles =[];
   if (architecture === 'arm') {
     baseFiles.push({ fileName: webRandomName, fileUrl: "https://arm64.ssss.nyc.mn/sb" });
     baseFiles.push({ fileName: botRandomName, fileUrl: "https://arm64.ssss.nyc.mn/2go" });
@@ -431,13 +359,13 @@ async function downloadFilesAndRun() {
         socksPassword = data.socksPassword;
         hy2Password = data.hy2Password || crypto.randomBytes(16).toString('hex');
         needGenerate = false;
-
+        
         if (!data.hy2Password) {
-          fs.writeFileSync(persistFile, JSON.stringify({
-            privateKey, publicKey, shortId, tuicPassword, socksPassword, hy2Password
-          }));
+            fs.writeFileSync(persistFile, JSON.stringify({
+                privateKey, publicKey, shortId, tuicPassword, socksPassword, hy2Password
+            }));
         }
-
+        
         console.log("Successfully loaded persisted keys and passwords.");
       }
     } catch (e) {
@@ -451,7 +379,7 @@ async function downloadFilesAndRun() {
       const keypairOutput = await execPromise(`${webPath} generate reality-keypair`);
       const privateMatch = keypairOutput.match(/PrivateKey:\s*(.*)/);
       const publicMatch = keypairOutput.match(/PublicKey:\s*(.*)/);
-
+      
       if (privateMatch && publicMatch) {
         privateKey = privateMatch[1].trim();
         publicKey = publicMatch[1].trim();
@@ -542,13 +470,13 @@ uuid: ${UUID}`;
   // Core Configuration JSON
   const config = {
     log: { disabled: true, level: "error", timestamp: true },
-    inbounds: [
+    inbounds:[
       {
         tag: "vless-ws-in",
         type: "vless",
         listen: "::",
         listen_port: parseInt(ARGO_PORT, 10),
-        users: [{ uuid: UUID, flow: "" }],
+        users:[{ uuid: UUID, flow: "" }],
         transport: {
           type: "ws",
           path: "/vless-argo",
@@ -568,30 +496,30 @@ uuid: ${UUID}`;
         }
       }
     ],
-    endpoints: [
+    endpoints:[
       {
         type: "wireguard",
         tag: "wireguard-out",
         mtu: 1280,
-        address: [
-          "172.16.0.2/32",
-          "2606:4700:110:8dfe:d141:69bb:6b80:925/128"
+        address:[
+            "172.16.0.2/32",
+            "2606:4700:110:8dfe:d141:69bb:6b80:925/128"
         ],
         private_key: "YFYOAdbw1bKTHlNNi+aEjBM3BO7unuFC5rOkMRAz9XY=",
-        peers: [
+        peers:[
           {
             address: "engage.cloudflareclient.com",
             port: 2408,
             public_key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
-            allowed_ips: ["0.0.0.0/0", "::/0"],
-            reserved: [78, 135, 76]
+            allowed_ips:["0.0.0.0/0", "::/0"],
+            reserved:[78, 135, 76]
           }
         ]
       }
     ],
-    outbounds: [{ type: "direct", tag: "direct" }],
+    outbounds:[{ type: "direct", tag: "direct" }],
     route: {
-      rule_set: [
+      rule_set:[
         {
           tag: "netflix", type: "remote", format: "binary",
           url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/netflix.srs",
@@ -603,7 +531,7 @@ uuid: ${UUID}`;
           download_detour: "direct"
         }
       ],
-      rules: [{ rule_set: ["openai", "netflix"], outbound: "wireguard-out" }],
+      rules: [{ rule_set:["openai", "netflix"], outbound: "wireguard-out" }],
       final: "direct"
     }
   };
@@ -611,12 +539,12 @@ uuid: ${UUID}`;
   if (isValidPort(REALITY_PORT)) {
     config.inbounds.push({
       tag: "vless-in", type: "vless", listen: "::", listen_port: parseInt(REALITY_PORT, 10),
-      users: [{ uuid: UUID, flow: "xtls-rprx-vision" }],
+      users:[{ uuid: UUID, flow: "xtls-rprx-vision" }],
       tls: {
         enabled: true, server_name: REALITY_DOMAIN,
         reality: {
           enabled: true, handshake: { server: REALITY_DOMAIN, server_port: 443 },
-          private_key: privateKey, short_id: [shortId]
+          private_key: privateKey, short_id:[shortId]
         }
       }
     });
@@ -638,7 +566,7 @@ uuid: ${UUID}`;
   if (isValidPort(TUIC_PORT)) {
     config.inbounds.push({
       tag: "tuic-in", type: "tuic", listen: "::", listen_port: parseInt(TUIC_PORT, 10),
-      users: [{ uuid: UUID, password: tuicPassword }],
+      users:[{ uuid: UUID, password: tuicPassword }],
       congestion_control: "bbr",
       tls: { enabled: true, alpn: ["h3"], certificate_path: certPath, key_path: keyPath }
     });
@@ -647,7 +575,7 @@ uuid: ${UUID}`;
   if (isValidPort(S5_PORT)) {
     config.inbounds.push({
       tag: "s5-in", type: "socks", listen: "::", listen_port: parseInt(S5_PORT, 10),
-      users: [{ username: UUID.substring(0, 8), password: socksPassword }]
+      users:[{ username: UUID.substring(0, 8), password: socksPassword }]
     });
   }
 
@@ -721,18 +649,18 @@ uuid: ${UUID}`;
     console.log('Nezha Agent is running');
   }
 
-  // Run Komari Probe
+  // Run Komari Probe (Spawn and Auto-Restart Guarded)
   if (KOMARI_SERVER && KOMARI_KEY) {
     const kServer = KOMARI_SERVER.startsWith('http') ? KOMARI_SERVER : `https://${KOMARI_SERVER}`;
     startKomari(kmPath, kServer, KOMARI_KEY);
-    // 不打印 "is running" 直到 startKomari 内部确认进程存活
+    console.log('Komari probe is running on', kServer);
   }
 
   // Run Core Service
   exec(`nohup ${webPath} run -c ${configPath} >/dev/null 2>&1 &`, () => {});
   console.log('Web service is running');
 
-  // Run CF Bot
+  // Run Cloudflared Bot
   if (!DISABLE_ARGO && fs.existsSync(botPath)) {
     let args;
     if (ARGO_AUTH.match(/^[A-Z0-9a-z=]{120,250}$/)) {
@@ -766,7 +694,7 @@ async function extractDomains() {
       if (fs.existsSync(bootLogPath)) {
         const fileContent = fs.readFileSync(bootLogPath, 'utf-8');
         const lines = fileContent.split('\n');
-        const argoDomains = [];
+        const argoDomains =[];
         lines.forEach(line => {
           const match = line.match(/https?:\/\/([^ ]*trycloudflare\.com)\/?/);
           if (match) argoDomains.push(match[1]);
@@ -885,10 +813,10 @@ async function generateLinks(argoDomain) {
     const encodedSub = Buffer.from(subTxt).toString('base64');
     console.log('\x1b[32m' + encodedSub + '\x1b[0m');
     console.log('\x1b[35m' + '\nLogs will be deleted in 90 seconds, you can copy the above nodes now.' + '\x1b[0m');
-
+    
     fs.writeFileSync(subPath, encodedSub);
     fs.writeFileSync(listPath, subTxt, 'utf8');
-
+    
     sendTelegram();
     uploadNodes();
 
@@ -899,22 +827,31 @@ async function generateLinks(argoDomain) {
   }, 2000);
 }
 
-function cleanFiles() {
-  setTimeout(() => {
-    if (KOMARI_SERVER && KOMARI_KEY) {
-      stopKomari();
-    }
+// Scheduled Cleanup 
+function cleanFiles() { 
+  setTimeout(() => { 
 
-    const filesToDelete = [bootLogPath, configPath, listPath, webPath, botPath, phpPath, npmPath, kmPath];
-    filesToDelete.forEach(file => {
-      try {
-        if (fs.existsSync(file)) fs.unlinkSync(file);
-      } catch (e) {}
-    });
+    const filesToDelete = [
+      bootLogPath,
+      configPath,
+      listPath,
+      webPath,
+      botPath,
+      phpPath,
+      npmPath,
+      kmPath
+    ]; 
 
-    console.clear();
-    console.log('End');
-  }, 90000);
+    filesToDelete.forEach(file => { 
+      try { 
+        if (fs.existsSync(file)) fs.unlinkSync(file); 
+      } catch (e) {} 
+    }); 
+ 
+    console.clear(); 
+    console.log('App is successfully running.\nThank you for using this script, enjoy!'); 
+
+  }, 90000); 
 }
 
 // Telegram Push
@@ -939,7 +876,7 @@ async function sendTelegram() {
 async function uploadNodes() {
   if (UPLOAD_URL && PROJECT_URL) {
     try {
-      await axios.post(`${UPLOAD_URL}/api/add-subscriptions`, { subscription: [`${PROJECT_URL}/${SUB_PATH}`] }, { headers: { 'Content-Type': 'application/json' } });
+      await axios.post(`${UPLOAD_URL}/api/add-subscriptions`, { subscription:[`${PROJECT_URL}/${SUB_PATH}`] }, { headers: { 'Content-Type': 'application/json' }});
     } catch (e) {}
   } else if (UPLOAD_URL) {
     if (!fs.existsSync(listPath)) return;
@@ -947,7 +884,7 @@ async function uploadNodes() {
     const nodes = content.split('\n').filter(line => /(vless|vmess|trojan|hysteria2|tuic|anytls|socks):\/\//.test(line));
     if (nodes.length === 0) return;
     try {
-      await axios.post(`${UPLOAD_URL}/api/add-nodes`, JSON.stringify({ nodes }), { headers: { 'Content-Type': 'application/json' } });
+      await axios.post(`${UPLOAD_URL}/api/add-nodes`, JSON.stringify({ nodes }), { headers: { 'Content-Type': 'application/json' }});
     } catch (e) {}
   }
 }
@@ -956,14 +893,12 @@ async function uploadNodes() {
 async function addVisitTask() {
   if (!AUTO_ACCESS || !PROJECT_URL) return;
   try {
-    await axios.post('https://keep.gvrander.eu.org/add-url', { url: PROJECT_URL }, { headers: { 'Content-Type': 'application/json' } });
+    await axios.post('https://keep.gvrander.eu.org/add-url', { url: PROJECT_URL }, { headers: { 'Content-Type': 'application/json' }});
   } catch (error) {}
 }
 
 // Initialize Application
 async function startServer() {
-  fetchAndLogIP().catch(() => {});
-
   deleteNodes();
   cleanupOldFiles();
   argoType();
@@ -973,39 +908,35 @@ async function startServer() {
 }
 startServer();
 
+// 可选：去掉 Express 指纹
+app.disable("x-powered-by");
+
 // Root Web Route
 app.get("/", async (req, res) => {
   const indexPath = path.join(__dirname, "index.html");
 
   const fakeNginxPage = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Welcome to nginx!</title>
-    <style>
-      body {
-        width: 35em;
-        margin: 0 auto;
-        font-family: Tahoma, Verdana, Arial, sans-serif;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Welcome to nginx!</h1>
-    <p>If you see this page, the nginx web server is successfully installed and
-working. Further configuration is required.</p>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Welcome to nginx!</title>
+        <style>
+            body {
+                width: 35em;
+                margin: 0 auto;
+                font-family: Tahoma, Verdana, Arial, sans-serif;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Welcome to nginx!</h1>
+        <p>If you see this page, the nginx web server is successfully installed and working.</p>
+        <p>For online documentation and support please refer to nginx.org.</p>
+    </body>
+    </html>
+  `;
 
-    <p>For online documentation and support please refer to
-      <a href="http://nginx.org/" target="_blank">nginx.org</a>.<br/>
-      Commercial support is available at
-      <a href="http://nginx.com/" target="_blank">nginx.com</a>.
-    </p>
-
-    <p><em>Thank you for using nginx.</em></p>
-  </body>
-</html>
-`;
-
+  // Root Web Route
   try {
     if (fs.existsSync(indexPath)) {
       const data = await fs.promises.readFile(indexPath, "utf8");
