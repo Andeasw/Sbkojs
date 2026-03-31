@@ -23,44 +23,44 @@ function parseBool(val, defaultVal) {
   return defaultVal;
 }
 
+const UPLOAD_URL = process.env.UPLOAD_URL || '';
+const PROJECT_URL = process.env.PROJECT_URL || '';
 const AUTO_ACCESS = parseBool(process.env.AUTO_ACCESS, false);
 const YT_WARPOUT = parseBool(process.env.YT_WARPOUT, false);
 const FILE_PATH = process.env.FILE_PATH || '.cache';
 const SUB_PATH = process.env.SUB_PATH || 'subb';
-
-const UUID = process.env.UUID || '26fbd6ba-3660-4058-a3c2-310bef5419fd';
-const KOMARI_SERVER = process.env.KOMARI_SERVER || ''; // e.g. https://km.example.com
-const KOMARI_KEY = process.env.KOMARI_KEY || '';
 const NEZHA_SERVER = process.env.NEZHA_SERVER || '';
 const NEZHA_PORT = process.env.NEZHA_PORT || '';
 const NEZHA_KEY = process.env.NEZHA_KEY || '';
+
+const UUID = process.env.UUID || 'bab21ffc-703c-4213-958d-ed355ba6b30c';
+const KOMARI_SERVER = process.env.KOMARI_SERVER || ''; // e.g. https://km.example.com
+const KOMARI_KEY = process.env.KOMARI_KEY || '';
 
 const ARGO_DOMAIN = process.env.ARGO_DOMAIN || '';
 const ARGO_AUTH = process.env.ARGO_AUTH || '';
 const ARGO_PORT = process.env.ARGO_PORT || 8001;
 const ARGO_VMESS_PORT = parseInt(ARGO_PORT, 10) + 1;
-const CFIP = process.env.CFIP || 'sub.danfeng.eu.org';
-const CFPORT = process.env.CFPORT || 443;
 const DISABLE_ARGO = parseBool(process.env.DISABLE_ARGO, true); // false/true
 
+const S5_PORT = process.env.S5_PORT || '';
 const TUIC_PORT = process.env.TUIC_PORT || '';
 const HY2_PORT = process.env.HY2_PORT || '';
 const HY2_OBFS = parseBool(process.env.HY2_OBFS, false); // ture/false
 const ANYTLS_PORT = process.env.ANYTLS_PORT || '';
-const S5_PORT = process.env.S5_PORT || '';
 const REALITY_PORT = process.env.REALITY_PORT || '';
 const ANYREALITY_PORT = process.env.ANYREALITY_PORT || '';
 const REALITY_DOMAIN = process.env.REALITY_DOMAIN || 'www.iij.ad.jp';
+const CFIP = process.env.CFIP || 'sub.danfeng.eu.org';
+const CFPORT = process.env.CFPORT || 443;
+const PORT = process.env.PORT || 3000;
 const NAME = process.env.NAME || '';
 const DOMAIN_NAME = process.env.DOMAIN_NAME || '';
 const DOMAIN_CERT = process.env.DOMAIN_CERT || '';
 const DOMAIN_KEY = process.env.DOMAIN_KEY || '';
 
-const PORT = process.env.PORT || 3000;
 const CHAT_ID = process.env.CHAT_ID || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
-const UPLOAD_URL = process.env.UPLOAD_URL || '';
-const PROJECT_URL = process.env.PROJECT_URL || '';
 
 // Create working directory
 if (!fs.existsSync(FILE_PATH)) {
@@ -108,12 +108,16 @@ const listPath = path.join(FILE_PATH, 'list.txt');
 const bootLogPath = path.join(FILE_PATH, 'boot.log');
 const configPath = path.join(FILE_PATH, 'config.json');
 
+// ── Komari Daemon State ───────────────────────────────────────
 const kmState = {
-  proc: null,
-  crashCount: 0,
-  stopped: false,
+  proc: null,       // 当前进程句柄
+  crashCount: 0,    // 连续崩溃次数
+  stopped: false,   // 外部停止标志
 };
 
+// 启动 komari-agent，崩溃后自动按指数回退重启
+// 存活 > 30s → crashCount 归零；否则 crashCount++
+// 回退延迟 = min(2^n × 2000, 60000) ms
 function startKomari(binPath, endpoint, token) {
   if (kmState.stopped) return;
 
@@ -144,6 +148,7 @@ function startKomari(binPath, endpoint, token) {
     setTimeout(() => startKomari(binPath, endpoint, token), delayMs);
   });
 }
+// ────────────────────────────────────────────────────────────
 
 // Delete old nodes remotely if applicable
 function deleteNodes() {
@@ -668,6 +673,7 @@ uuid: ${UUID}`;
     } else if (ARGO_AUTH.match(/TunnelSecret/)) {
       args = `tunnel --edge-ip-version auto --config ${path.join(FILE_PATH, 'tunnel.yml')} run`;
     } else {
+      // 临时隧道默认指向主协议 ARGO_PORT(VLESS)
       args = `tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile ${bootLogPath} --loglevel info --url http://localhost:${ARGO_PORT}`;
     }
     exec(`nohup ${botPath} ${args} >/dev/null 2>&1 &`, () => {});
@@ -708,6 +714,7 @@ async function extractDomains() {
           fs.unlinkSync(bootLogPath);
           try { await execPromise(`pkill -f "${botRandomName}" > /dev/null 2>&1`); } catch (err) {}
           await new Promise(r => setTimeout(r, 1000));
+          // 修复点：重启临时隧道时，URL依然固定指向 ARGO_PORT(VLESS为主协议)
           const args = `tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile ${bootLogPath} --loglevel info --url http://localhost:${ARGO_PORT}`;
           exec(`nohup ${botPath} ${args} >/dev/null 2>&1 &`);
           setTimeout(() => extractDomains(), 6000);
@@ -764,10 +771,12 @@ async function generateLinks(argoDomain) {
     let subTxt = '';
 
     if (!DISABLE_ARGO && argoDomain) {
+      // 始终优先生成 vless+argo 作为主隧道节点
       const vlessPath = encodeURIComponent('/vless-argo?ed=2560');
       const vlessLink = `vless://${UUID}@${CFIP}:${CFPORT}?encryption=none&security=tls&sni=${argoDomain}&type=ws&host=${argoDomain}&path=${vlessPath}&fp=firefox#${nodeName}-VLESS`;
       subTxt = `${vlessLink}`;
 
+      // 修复点：仅当配置了固定隧道参数 (ARGO_AUTH) 时，才额外生成 vmess+argo
       if (ARGO_AUTH) {
         const vmessConfig = {
           v: '2', ps: `${nodeName}-VMess`, add: CFIP, port: CFPORT, id: UUID, aid: '0',
