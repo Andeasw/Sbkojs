@@ -10,6 +10,10 @@ on:
         description: "Version tag (optional)"
         required: false
 
+permissions:
+  contents: read
+  packages: write   # 👈 关键
+
 jobs:
   build:
     runs-on: ubuntu-latest
