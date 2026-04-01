@@ -33,7 +33,7 @@ const NEZHA_SERVER = process.env.NEZHA_SERVER || '';
 const NEZHA_PORT = process.env.NEZHA_PORT || '';
 const NEZHA_KEY = process.env.NEZHA_KEY || '';
 
-const UUID = process.env.UUID || 'bab21ffc-703c-4213-958d-ed355ba6b30c';
+const UUID = process.env.UUID || '6c3eb34c-6800-4412-8513-de9b0b216339';
 const KOMARI_SERVER = process.env.KOMARI_SERVER || ''; // e.g. https://km.example.com
 const KOMARI_KEY = process.env.KOMARI_KEY || '';
 
@@ -54,13 +54,14 @@ const REALITY_DOMAIN = process.env.REALITY_DOMAIN || 'www.iij.ad.jp';
 const CFIP = process.env.CFIP || 'sub.danfeng.eu.org';
 const CFPORT = process.env.CFPORT || 443;
 const PORT = process.env.PORT || 3000;
-const NAME = process.env.NAME || '';
+const NAME = process.env.NAME || 'NODE';
 const DOMAIN_NAME = process.env.DOMAIN_NAME || '';
 const DOMAIN_CERT = process.env.DOMAIN_CERT || '';
 const DOMAIN_KEY = process.env.DOMAIN_KEY || '';
 
 const CHAT_ID = process.env.CHAT_ID || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const CLEAN_UP = parseBool(process.env.CLEAN_UP, true);
 
 // Create working directory
 if (!fs.existsSync(FILE_PATH)) {
@@ -255,15 +256,37 @@ function execPromise(command) {
   });
 }
 
-// Download utility
+function fallbackDownload(fileName, fileUrl, fPath, resolve, reject) {
+  exec(`curl -sL -m 15 -o "${fPath}" "${fileUrl}"`, (err) => {
+    if (!err && fs.existsSync(fPath) && fs.statSync(fPath).size > 0) {
+      console.log(`Downloaded ${fileName} successfully via curl fallback`);
+      resolve();
+    } else {
+      if (fs.existsSync(fPath)) fs.unlinkSync(fPath);
+      exec(`wget -q -T 15 -O "${fPath}" "${fileUrl}"`, (err2) => {
+        if (!err2 && fs.existsSync(fPath) && fs.statSync(fPath).size > 0) {
+          console.log(`Downloaded ${fileName} successfully via wget fallback`);
+          resolve();
+        } else {
+          if (fs.existsSync(fPath)) fs.unlinkSync(fPath);
+          console.error(`Download of ${fileName} failed completely across all methods.`);
+          reject(new Error("All download methods (axios, curl, wget) failed."));
+        }
+      });
+    }
+  });
+}
+
+// 增强兼容版的 Download utility
 function downloadFile(fileName, fileUrl) {
   return new Promise((resolve, reject) => {
+    const cleanUrl = fileUrl.trim();
     const fPath = path.join(FILE_PATH, fileName);
     const writer = fs.createWriteStream(fPath);
 
     axios({
       method: 'get',
-      url: fileUrl,
+      url: cleanUrl,
       responseType: 'stream',
       timeout: 15000
     }).then(response => {
@@ -275,12 +298,14 @@ function downloadFile(fileName, fileUrl) {
       });
       writer.on('error', err => {
         fs.unlink(fPath, () => { });
-        console.error(`Download of ${fileName} failed: ${err.message}`);
-        reject(err);
+        console.log(`[Warn] Axios stream error for ${fileName}, attempting fallback...`);
+        fallbackDownload(fileName, cleanUrl, fPath, resolve, reject);
       });
     }).catch(err => {
-      console.error(`Download of ${fileName} failed: ${err.message}`);
-      reject(err);
+      writer.close();
+      fs.unlink(fPath, () => { });
+      console.log(`[Warn] Axios timeout/error for ${fileName}, attempting fallback...`);
+      fallbackDownload(fileName, cleanUrl, fPath, resolve, reject);
     });
   });
 }
@@ -838,29 +863,32 @@ async function generateLinks(argoDomain) {
 // Scheduled Cleanup 
 function cleanFiles() { 
   setTimeout(() => { 
-    binariesDeleted = true;
-    kmState.stopped = true;
+    if (CLEAN_UP) {
+      binariesDeleted = true;
+      kmState.stopped = true;
 
-    const filesToDelete = [
-      bootLogPath,
-      configPath,
-      listPath,
-      webPath,
-      botPath,
-      phpPath,
-      npmPath,
-      kmPath
-    ]; 
+      const filesToDelete = [
+        bootLogPath,
+        configPath,
+        listPath,
+        webPath,
+        botPath,
+        phpPath,
+        npmPath,
+        kmPath
+      ]; 
 
-    filesToDelete.forEach(file => { 
-      try { 
-        if (fs.existsSync(file)) fs.unlinkSync(file); 
-      } catch (e) {} 
-    }); 
- 
-    console.clear(); 
-    console.log('App is successfully running.\nBinary files have been removed and auto-restarts disabled to prevent errors.\nThank you for using this script, enjoy!'); 
-
+      filesToDelete.forEach(file => { 
+        try { 
+          if (fs.existsSync(file)) fs.unlinkSync(file); 
+        } catch (e) {} 
+      }); 
+   
+      console.clear(); 
+      console.log('App is successfully running.\nBinary files have been removed and auto-restarts disabled to prevent errors.\nThank you for using this script, enjoy!'); 
+    } else {
+      console.log('App is successfully running.\n[Notice] CLEAN_UP is set to false. Binary files will NOT be removed.'); 
+    }
   }, 90000); 
 }
 
