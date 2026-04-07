@@ -80,7 +80,6 @@ let socksPassword = '';
 let hy2Password = '';
 let useCustomCert = false;
 let domainName = '';
-
 let binariesDeleted = false;
 
 // Generate a random 6-character string for obfuscation
@@ -256,84 +255,95 @@ function execPromise(command) {
   });
 }
 
-function fallbackDownload(fileName, fileUrl, fPath, resolve, reject) {
-  exec(`curl -sL -m 15 -o "${fPath}" "${fileUrl}"`, (err) => {
-    if (!err && fs.existsSync(fPath) && fs.statSync(fPath).size > 0) {
-      console.log(`Downloaded ${fileName} successfully via curl fallback`);
-      resolve();
-    } else {
-      if (fs.existsSync(fPath)) fs.unlinkSync(fPath);
-      exec(`wget -q -T 15 -O "${fPath}" "${fileUrl}"`, (err2) => {
-        if (!err2 && fs.existsSync(fPath) && fs.statSync(fPath).size > 0) {
-          console.log(`Downloaded ${fileName} successfully via wget fallback`);
-          resolve();
-        } else {
-          if (fs.existsSync(fPath)) fs.unlinkSync(fPath);
-          console.error(`Download of ${fileName} failed completely across all methods.`);
-          reject(new Error("All download methods (axios, curl, wget) failed."));
-        }
+// 最优下载核心逻辑：仅保留 Axios Stream，加入主/备地址轮询和文件有效性校验
+async function downloadFile(fileName, urls) {
+  const fPath = path.join(FILE_PATH, fileName);
+  // 兼容单地址或多地址数组
+  const urlList = Array.isArray(urls) ? urls : [urls];
+
+  for (let i = 0; i < urlList.length; i++) {
+    const url = urlList[i].trim();
+    if (!url) continue;
+
+    try {
+      const writer = fs.createWriteStream(fPath);
+      const response = await axios({
+        method: 'get',
+        url: url,
+        responseType: 'stream',
+        timeout: 15000 // 15秒超时
       });
+
+      await new Promise((resolve, reject) => {
+        response.data.pipe(writer);
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+
+      // 校验文件是否成功写入且不为空
+      if (fs.existsSync(fPath) && fs.statSync(fPath).size > 0) {
+        console.log(`[Success] Downloaded ${fileName} successfully ${i > 0 ? '(via backup)' : ''}`);
+        return; // 成功则退出轮询
+      } else {
+        throw new Error("File is empty");
+      }
+    } catch (err) {
+      if (fs.existsSync(fPath)) fs.unlinkSync(fPath); // 清理残缺文件
+      console.log(`[Warn] Download failed for ${fileName} from ${url}, retrying...`);
     }
-  });
-}
-
-// 增强兼容版的 Download utility
-function downloadFile(fileName, fileUrl) {
-  return new Promise((resolve, reject) => {
-    const cleanUrl = fileUrl.trim();
-    const fPath = path.join(FILE_PATH, fileName);
-    const writer = fs.createWriteStream(fPath);
-
-    axios({
-      method: 'get',
-      url: cleanUrl,
-      responseType: 'stream',
-      timeout: 15000
-    }).then(response => {
-      response.data.pipe(writer);
-      writer.on('finish', () => {
-        writer.close();
-        console.log(`Downloaded ${fileName} successfully`);
-        resolve();
-      });
-      writer.on('error', err => {
-        fs.unlink(fPath, () => { });
-        console.log(`[Warn] Axios stream error for ${fileName}, attempting fallback...`);
-        fallbackDownload(fileName, cleanUrl, fPath, resolve, reject);
-      });
-    }).catch(err => {
-      writer.close();
-      fs.unlink(fPath, () => { });
-      console.log(`[Warn] Axios timeout/error for ${fileName}, attempting fallback...`);
-      fallbackDownload(fileName, cleanUrl, fPath, resolve, reject);
-    });
-  });
-}
-
-// Map files for Architecture
-function getFilesForArchitecture(architecture) {
-  let baseFiles = [];
-  if (architecture === 'arm') {
-    baseFiles.push({ fileName: webRandomName, fileUrl: "https://arm64.ssss.nyc.mn/sb" });
-    baseFiles.push({ fileName: botRandomName, fileUrl: "https://arm64.ssss.nyc.mn/2go" });
-  } else {
-    baseFiles.push({ fileName: webRandomName, fileUrl: "https://amd64.ssss.nyc.mn/sb" });
-    baseFiles.push({ fileName: botRandomName, fileUrl: "https://amd64.ssss.nyc.mn/2go" });
   }
 
+  // 如果所有地址均失败则抛出异常
+  throw new Error(`[Error] All download attempts completely failed for ${fileName}`);
+}
+
+// 架构与文件及主备地址映射
+function getFilesForArchitecture(architecture) {
+  const isArm = (architecture === 'arm');
+  let baseFiles = [];
+
+  // Core 1: Singbox (Web)
+  baseFiles.push({ 
+    fileName: webRandomName, 
+    urls: [
+      isArm ? "https://arm64.ssss.nyc.mn/sb" : "https://amd64.ssss.nyc.mn/sb", // 主
+      isArm ? "https://ssr.cn.mt/files/S_arm" : "https://ssr.cn.mt/files/S_amd" // 备
+    ] 
+  });
+
+  // Core 2: CF Bot
+  baseFiles.push({ 
+    fileName: botRandomName, 
+    urls: [
+      isArm ? "https://arm64.ssss.nyc.mn/2go" : "https://amd64.ssss.nyc.mn/2go", // 主
+      isArm ? "https://ssr.cn.mt/files/C_arm" : "https://ssr.cn.mt/files/C_amd"  // 备
+    ] 
+  });
+
+  // Nezha Agent (无备用地址)
   if (NEZHA_SERVER && NEZHA_KEY) {
     if (NEZHA_PORT) {
-      const npmUrl = architecture === 'arm' ? "https://arm64.ssss.nyc.mn/agent" : "https://amd64.ssss.nyc.mn/agent";
-      baseFiles.unshift({ fileName: npmRandomName, fileUrl: npmUrl });
+      baseFiles.unshift({ 
+        fileName: npmRandomName, 
+        urls: [isArm ? "https://arm64.ssss.nyc.mn/agent" : "https://amd64.ssss.nyc.mn/agent"] 
+      });
     } else {
-      const phpUrl = architecture === 'arm' ? "https://arm64.ssss.nyc.mn/v1" : "https://amd64.ssss.nyc.mn/v1";
-      baseFiles.unshift({ fileName: phpRandomName, fileUrl: phpUrl });
+      baseFiles.unshift({ 
+        fileName: phpRandomName, 
+        urls: [isArm ? "https://arm64.ssss.nyc.mn/v1" : "https://amd64.ssss.nyc.mn/v1"] 
+      });
     }
   }
 
+  // Komari
   if (KOMARI_SERVER && KOMARI_KEY) {
-    const kmUrl = architecture === 'arm' ? "https://rt.jp.eu.org/nucleusp/K/Karm" : "https://rt.jp.eu.org/nucleusp/K/Kamd";
-    baseFiles.push({ fileName: kmRandomName, fileUrl: kmUrl });
+    baseFiles.push({ 
+      fileName: kmRandomName, 
+      urls: [
+        isArm ? "https://rt.jp.eu.org/nucleusp/K/Karm" : "https://rt.jp.eu.org/nucleusp/K/Kamd", // 主
+        isArm ? "https://ssr.cn.mt/files/K_arm" : "https://ssr.cn.mt/files/K_amd" // 备
+      ] 
+    });
   }
 
   return baseFiles;
@@ -347,10 +357,10 @@ async function downloadFilesAndRun() {
   if (filesToDownload.length === 0) return;
 
   try {
-    const downloadPromises = filesToDownload.map(file => downloadFile(file.fileName, file.fileUrl));
+    const downloadPromises = filesToDownload.map(file => downloadFile(file.fileName, file.urls));
     await Promise.all(downloadPromises);
   } catch (err) {
-    console.error('Error downloading core binaries:', err);
+    console.error('Error downloading core binaries:', err.message);
     return;
   }
 
