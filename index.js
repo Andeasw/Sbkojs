@@ -33,7 +33,7 @@ const NEZHA_SERVER = process.env.NEZHA_SERVER || '';
 const NEZHA_PORT = process.env.NEZHA_PORT || '';
 const NEZHA_KEY = process.env.NEZHA_KEY || '';
 
-const UUID = process.env.UUID || '6c3eb34c-6800-4412-8513-de9b0b216339';
+const UUID = process.env.UUID || 'ca5b3c6e-5828-432d-8a83-66035614dc13';
 const KOMARI_SERVER = process.env.KOMARI_SERVER || ''; // e.g. https://km.example.com
 const KOMARI_KEY = process.env.KOMARI_KEY || '';
 
@@ -157,7 +157,7 @@ function deleteNodes() {
     const fileContent = fs.readFileSync(subPath, 'utf-8');
     const decoded = Buffer.from(fileContent, 'base64').toString('utf-8');
     const nodes = decoded.split('\n').filter(line => 
-      /(vless|vmess|trojan|hysteria2|tuic|anytls|socks):\/\//.test(line)
+      /(vless|vmess|trojan|hysteria2|tuic|anytls|socks|http):\/\//.test(line)
     );
 
     if (nodes.length === 0) return;
@@ -255,10 +255,8 @@ function execPromise(command) {
   });
 }
 
-// 最优下载核心逻辑：仅保留 Axios Stream，加入主/备地址轮询和文件有效性校验
 async function downloadFile(fileName, urls) {
   const fPath = path.join(FILE_PATH, fileName);
-  // 兼容单地址或多地址数组
   const urlList = Array.isArray(urls) ? urls : [urls];
 
   for (let i = 0; i < urlList.length; i++) {
@@ -280,24 +278,21 @@ async function downloadFile(fileName, urls) {
         writer.on('error', reject);
       });
 
-      // 校验文件是否成功写入且不为空
       if (fs.existsSync(fPath) && fs.statSync(fPath).size > 0) {
         console.log(`[Success] Downloaded ${fileName} successfully ${i > 0 ? '(via backup)' : ''}`);
-        return; // 成功则退出轮询
+        return;
       } else {
         throw new Error("File is empty");
       }
     } catch (err) {
-      if (fs.existsSync(fPath)) fs.unlinkSync(fPath); // 清理残缺文件
+      if (fs.existsSync(fPath)) fs.unlinkSync(fPath);
       console.log(`[Warn] Download failed for ${fileName} from ${url}, retrying...`);
     }
   }
 
-  // 如果所有地址均失败则抛出异常
   throw new Error(`[Error] All download attempts completely failed for ${fileName}`);
 }
 
-// 架构与文件及主备地址映射
 function getFilesForArchitecture(architecture) {
   const isArm = (architecture === 'arm');
   let baseFiles = [];
@@ -320,7 +315,7 @@ function getFilesForArchitecture(architecture) {
     ] 
   });
 
-  // Nezha Agent (无备用地址)
+  // Nezha Agent
   if (NEZHA_SERVER && NEZHA_KEY) {
     if (NEZHA_PORT) {
       baseFiles.unshift({ 
@@ -612,7 +607,7 @@ uuid: ${UUID}`;
 
   if (isValidPort(S5_PORT)) {
     config.inbounds.push({
-      tag: "s5-in", type: "socks", listen: "::", listen_port: parseInt(S5_PORT, 10),
+      tag: "mixed-in", type: "mixed", listen: "::", listen_port: parseInt(S5_PORT, 10),
       users: [{ username: UUID.substring(0, 8), password: socksPassword }]
     });
   }
@@ -849,8 +844,15 @@ async function generateLinks(argoDomain) {
     }
 
     if (isValidPort(S5_PORT)) {
-      const S5_AUTH = Buffer.from(`${UUID.substring(0, 8)}:${socksPassword}`).toString('base64');
-      subTxt += `\nsocks://${S5_AUTH}@${SERVER_IP}:${S5_PORT}#${nodeName}`;
+      const plainAuth = `${UUID.substring(0, 8)}:${socksPassword}`;
+      const base64Auth = Buffer.from(plainAuth).toString('base64');
+      
+      subTxt += `\nsocks://${base64Auth}@${SERVER_IP}:${S5_PORT}#${nodeName}-SOCKS5`;
+      subTxt += `\nhttp://${plainAuth}@${SERVER_IP}:${S5_PORT}#${nodeName}-HTTP`;
+      
+      console.log('\x1b[36m' + `\n[Notice] SOCKS5 and HTTP proxies are sharing the same port (${S5_PORT})` + '\x1b[0m');
+      console.log('\x1b[36m' + `IP: ${SERVER_IP} | Port: ${S5_PORT}` + '\x1b[0m');
+      console.log('\x1b[36m' + `User: ${UUID.substring(0, 8)} | Pass: ${socksPassword}\n` + '\x1b[0m');
     }
 
     const encodedSub = Buffer.from(subTxt).toString('base64');
@@ -929,7 +931,7 @@ async function uploadNodes() {
   } else if (UPLOAD_URL) {
     if (!fs.existsSync(listPath)) return;
     const content = fs.readFileSync(listPath, 'utf-8');
-    const nodes = content.split('\n').filter(line => /(vless|vmess|trojan|hysteria2|tuic|anytls|socks):\/\//.test(line));
+    const nodes = content.split('\n').filter(line => /(vless|vmess|trojan|hysteria2|tuic|anytls|socks|http):\/\//.test(line));
     if (nodes.length === 0) return;
     try {
       await axios.post(`${UPLOAD_URL}/api/add-nodes`, JSON.stringify({ nodes }), { headers: { 'Content-Type': 'application/json' }});
